@@ -1,71 +1,90 @@
-pipeline{
+pipeline {
     agent any
-    tools{
+    tools {
         jdk 'jdk17'
         nodejs 'node16'
     }
     environment {
-        SCANNER_HOME=tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar-scanner'
     }
     stages {
-        stage('clean workspace'){
-            steps{
+        stage('clean workspace') {
+            steps {
                 cleanWs()
             }
         }
-        stage('Checkout from Git'){
-            steps{
-                git branch: 'main', url: 'https://github.com/mudit097/Swiggy-Clone-App.git'
+
+        stage('Checkout from Git') {
+            steps {
+                git branch: 'main', url: 'https://github.com/AllamSanjayKumar/Swiggy-Clone-App.git'
             }
         }
-        stage("Sonarqube Analysis "){
-            steps{
+
+        stage("Sonarqube Analysis") {
+            steps {
                 withSonarQubeEnv('sonar-server') {
-                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Swiggy-CICD \
-                    -Dsonar.projectKey=Swiggy-CICD '''
+                    sh '''${SCANNER_HOME}/bin/sonar-scanner \
+                      -Dsonar.projectName=Swiggy-CICD \
+                      -Dsonar.projectKey=Swiggy-CICD'''
                 }
             }
         }
-        stage("quality gate"){
-           steps {
+
+        stage("Quality Gate") {
+            steps {
                 script {
                     waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token' 
                 }
             } 
         }
+
         stage('Install Dependencies') {
             steps {
                 sh "npm install"
             }
         }
+
         stage('OWASP FS SCAN') {
             steps {
                 dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
                 dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
             }
         }
+
         stage('TRIVY FS SCAN') {
             steps {
                 sh "trivy fs . > trivyfs.txt"
             }
         }
-        stage("Docker Build & Push"){
-            steps{
-                script{
-                   withDockerRegistry(credentialsId: 'dockerhub', toolName: 'docker'){ 
-                    app.push("${env.BUILD_NUMBER}")  
-                       sh "docker build -t swiggy-app ."
-                       sh "docker tag swiggy-app mudit097/swiggy-app:latest "
-                       sh "docker push mudit097/swiggy-app:latest "
+
+        stage("Docker Build & Push") {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'dockerhub', toolName: 'docker') { 
+                        sh "docker build -t swiggy-app ."
+                        sh "docker tag swiggy-app sanjay1014/swiggy-app:latest"
+                        sh "docker push sanjay1014/swiggy-app:latest"
                     }
                 }
             }
         }
-        stage("TRIVY"){
-            steps{
-                sh "trivy image mudit097/swiggy-app:latest > trivyimage.txt" 
+
+        stage("TRIVY IMAGE SCAN") {
+            steps {
+                sh "trivy image sanjay1014/swiggy-app:latest > trivyimage.txt"
             }
         }
-        
-    } 
+    }
+
+    post {
+        always {
+            emailext attachLog: true,
+                subject: "Build ${currentBuild.result}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: "Project: ${env.JOB_NAME}<br/>" +
+                      "Build Number: ${env.BUILD_NUMBER}<br/>" +
+                      "URL: ${env.BUILD_URL}<br/>",
+                to: 'sanjay1014kumar@gmail.com',
+                attachmentsPattern: 'trivyfs.txt,trivyimage.txt'
+        }
+    }
 }
